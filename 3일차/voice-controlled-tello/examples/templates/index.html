@@ -1,0 +1,319 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tello Drone Scanner</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .video-container {
+            margin: 20px 0;
+            text-align: center;
+            background: #000;
+            padding: 10px;
+            border-radius: 10px;
+        }
+        .video-container img {
+            border-radius: 5px;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+            border: 1px solid #d6e9c6;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+            border: 1px solid #ebccd1;
+        }
+        #analysis {
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            min-height: 100px;
+        }
+        .agent-control {
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        .agent-control h2 {
+            margin-top: 0;
+            color: #333;
+            font-size: 1.5em;
+            margin-bottom: 15px;
+        }
+        .agent-input {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 15px;
+        }
+        .agent-control select,
+        .agent-control input[type="text"] {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .agent-control select {
+            width: 200px;
+        }
+        .agent-control input[type="text"] {
+            flex-grow: 1;
+        }
+        .agent-control button {
+            min-width: 120px;
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        .section-title {
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #4CAF50;
+        }
+        .voice-control {
+            margin: 20px 0;
+            text-align: center;
+        }
+        .voice-button {
+            padding: 15px 30px;
+            font-size: 18px;
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .voice-button:hover {
+            background-color: #c0392b;
+        }
+        .voice-button.recording {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Tello Drone Scanner</h1>
+        
+        <div class="section">
+            <h2 class="section-title">드론 카메라</h2>
+            <div class="video-container">
+                <img src="{{ url_for('video_feed') }}" width="640" height="480">
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">기본 제어</h2>
+            <div class="controls">
+                <button onclick="connectDrone()">드론 연결</button>
+                <button onclick="scanSurroundings()">주변 스캔</button>
+                <button onclick="createPanorama()">파노라마 촬영</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">AI 에이전트 제어</h2>
+            <div class="agent-control">
+                <div class="agent-input">
+                    <select id="agentType">
+                        <option value="drone">드론 제어 에이전트</option>
+                        <option value="camera">카메라 제어 에이전트</option>
+                        <option value="code">코드 에이전트 (실험적)</option>
+                    </select>
+                    <input type="text" id="command" placeholder="자연어로 명령을 입력하세요 (예: '3미터 앞으로 이동하고 90도 회전해줘')">
+                    <button onclick="sendAgentCommand()">명령 전송</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">음성 제어</h2>
+            <div class="voice-control">
+                <button id="voiceButton" class="voice-button" onclick="startVoiceControl()">
+                    음성 명령하기
+                </button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">상태 및 분석</h2>
+            <div id="status"></div>
+            <div id="analysis"></div>
+        </div>
+    </div>
+
+    <script>
+        function updateStatus(message, isError = false) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = isError ? 'error' : 'success';
+        }
+
+        function updateAnalysis(text) {
+            const analysisDiv = document.getElementById('analysis');
+            analysisDiv.textContent = text;
+        }
+
+        async function connectDrone() {
+            try {
+                updateStatus("드론 연결 중...");
+                const response = await fetch('/connect', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                updateStatus(data.message, data.status === 'error');
+            } catch (error) {
+                updateStatus('연결 중 오류가 발생했습니다: ' + error, true);
+            }
+        }
+
+        async function scanSurroundings() {
+            try {
+                updateStatus("주변 스캔 중...");
+                const response = await fetch('/scan', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                updateStatus(data.message, data.status === 'error');
+                if (data.analysis) {
+                    updateAnalysis(data.analysis);
+                }
+            } catch (error) {
+                updateStatus('스캔 중 오류가 발생했습니다: ' + error, true);
+            }
+        }
+
+        async function createPanorama() {
+            try {
+                updateStatus("파노라마 촬영 중...");
+                const response = await fetch('/panorama', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                updateStatus(data.message, data.status === 'error');
+                if (data.analysis) {
+                    updateAnalysis(data.analysis);
+                }
+            } catch (error) {
+                updateStatus('파노라마 촬영 중 오류가 발생했습니다: ' + error, true);
+            }
+        }
+
+        async function sendAgentCommand() {
+            try {
+                const agentType = document.getElementById('agentType').value;
+                const command = document.getElementById('command').value;
+                
+                if (!command) {
+                    updateStatus('명령어를 입력해주세요.', true);
+                    return;
+                }
+                
+                updateStatus("에이전트에게 명령 전송 중...");
+                const response = await fetch('/agent_control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        agent_type: agentType,
+                        command: command
+                    })
+                });
+                const data = await response.json();
+                updateStatus(data.message, data.status === 'error');
+            } catch (error) {
+                updateStatus('명령 실행 중 오류가 발생했습니다: ' + error, true);
+            }
+        }
+
+        async function startVoiceControl() {
+            const button = document.getElementById('voiceButton');
+            button.classList.add('recording');
+            button.textContent = '듣는 중...';
+            button.disabled = true;
+            
+            try {
+                updateStatus("음성 명령을 듣는 중...");
+                const response = await fetch('/start_recording', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    updateStatus(`명령 실행 완료: ${data.command}`);
+                    if (data.result) {
+                        updateAnalysis(data.result);
+                    }
+                } else {
+                    updateStatus(data.message, true);
+                }
+            } catch (error) {
+                updateStatus('음성 명령 처리 중 오류가 발생했습니다: ' + error, true);
+            } finally {
+                button.classList.remove('recording');
+                button.textContent = '음성 명령하기';
+                button.disabled = false;
+            }
+        }
+
+        // Enter 키로 명령 전송
+        document.getElementById('command').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendAgentCommand();
+            }
+        });
+    </script>
+</body>
+</html>
